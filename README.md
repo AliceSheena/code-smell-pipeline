@@ -1,69 +1,79 @@
 # ML Code Smell Localisation and Refactoring Pipeline
 
-This repository implements a two-stage pipeline for Python ML code smell localisation and refactoring.
-It is designed to handle multiple smell types and scale from the In-Place API Misuse subset to a broader ML code smell taxonomy.
+A two-stage system for Python ML code smells:
+- localise smelly lines and smell type,
+- generate corrected refactorings.
 
-## Project structure
+This repo is built for a split workflow:
+- **VS Code / local**: dataset preparation, deterministic AST detection, wrapper code, training scripts, evaluation harness, and CLI scaffolding.
+- **Google Colab (free T4)**: actual LoRA fine-tuning for UniXcoder and CodeT5(+).
 
-- `data/prepare_dataset.py` — load, verify, and split the dataset.
-- `localisation/ast_detector.py` — deterministic AST-based InPlace API misuse detector.
-- `localisation/unixcoder_model.py` — UniXcoder + LoRA localisation scaffold.
-- `refactoring/codet5_model.py` — CodeT5(+) refactoring scaffold.
-- `refactoring/train_codet5.py` — entry point for CodeT5 training.
-- `baselines/few_shot_baseline.py` — non-fine-tuned few-shot comparison scaffold.
+## What is included
+
+- `data/prepare_dataset.py` — verify JSONL entries, recover clean examples, and split the dataset.
+- `data/dataset_utils.py` — build token-labelled localisation examples and seq2seq refactoring examples.
+- `localisation/ast_detector.py` — deterministic AST rules for InPlace API misuse.
+- `localisation/unixcoder_model.py` — UniXcoder dual-head model scaffold with LoRA support.
+- `localisation/train_localisation.py` — localisation training entrypoint.
+- `refactoring/codet5_model.py` — CodeT5(+) generation scaffold with training/eval loops.
+- `refactoring/train_codet5.py` — refactoring training entrypoint.
 - `evaluation/metrics.py` — line IoU, token F1, CodeBLEU, exact match.
-- `evaluation/run_eval.py` — evaluation runner for predictions and references.
-- `pipeline/end_to_end.py` — single-file CLI for localisation + refactoring.
-- `ablation/codet5_no_prefix.py` — prefix-ablation setup.
-- `requirements.txt` — pinned open-source dependencies.
-- `DECISIONS.md` — high-level decisions and design rationale.
+- `evaluation/run_eval.py` — compare predictions and references.
+- `pipeline/end_to_end.py` — inference CLI for localisation + refactoring.
+- `ablation/codet5_no_prefix.py` — prefix-ablation entrypoint.
+- `tests/test_smoke.py` — local smoke tests for the current build.
+
+## Dataset format
+
+The expected JSONL schema is:
+
+```json
+{
+  "smell_type": "In-Place APIs Misused",
+  "smell_location": {
+    "start_line": 1,
+    "end_line": 1,
+    "smelly_lines": [1]
+  },
+  "code_smell_code": "...",
+  "refactoring_code": "..."
+}
+```
+
+Each line should be a valid JSON object.
 
 ## Setup
 
-1. Create a Python environment:
-
 ```bash
+cd /Users/sheena/code-smell-pipeline
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Prepare your dataset using the expected JSONL schema.
+## Local workflow (no GPU required)
+
+Verify and split the dataset:
 
 ```bash
 python data/prepare_dataset.py --input path/to/dataset.jsonl --output-dir ./data
 ```
 
-## Notes
-
-- The AST detector is a fast rule-based baseline for InPlace API misuse, with explicit line extraction.
-- The localisation and refactoring models now include training loops using Hugging Face models and tokenizer-based data preparation.
-- The code is written to support multi-smell datasets once data grouping and labels are available.
-
-## Running the pipeline
-
-This project is split across two environments:
-
-1. **VS Code (local)**: build, validate, and prepare everything that does not require a GPU.
-2. **Google Colab (free T4)**: execute the actual LoRA training runs for UniXcoder and CodeT5(+).
-
-### Local workflow
-
-Prepare the dataset:
-
-```bash
-python data/prepare_dataset.py --input path/to/dataset.jsonl --output-dir ./data
-```
-
-Run the rule-based AST localisation on a snippet:
+Run the AST detector on a snippet:
 
 ```bash
 python pipeline/end_to_end.py --input-file path/to/snippet.py --use-ast
 ```
 
-### Colab training workflow
+Run smoke tests:
 
-Train the localisation model on Colab:
+```bash
+python3 -m unittest discover -s tests
+```
+
+## Colab workflow (GPU required)
+
+Train localisation on Colab:
 
 ```bash
 python localisation/train_localisation.py \
@@ -75,7 +85,7 @@ python localisation/train_localisation.py \
   --batch-size 2
 ```
 
-Train the refactoring model on Colab:
+Train refactoring on Colab:
 
 ```bash
 python refactoring/train_codet5.py \
@@ -87,20 +97,36 @@ python refactoring/train_codet5.py \
   --batch-size 2
 ```
 
-### Evaluation and inference
+## Evaluation
 
-After Colab training, evaluate predictions locally:
+After training and generating predictions:
 
 ```bash
 python evaluation/run_eval.py --predictions predictions.jsonl --references data/splits/test.jsonl
 ```
 
-Run end-to-end inference with the saved models:
+Run end-to-end inference with saved models:
 
 ```bash
-python pipeline/end_to_end.py --input-file path/to/snippet.py --use-ast --localiser-model models/localisation --refactor-model models/refactoring
+python pipeline/end_to_end.py \
+  --input-file path/to/snippet.py \
+  --use-ast \
+  --localiser-model models/localisation \
+  --refactor-model models/refactoring
 ```
 
-## Colab fit
+## Git status
 
-The repo is designed to run the actual model fine-tuning on a free-tier Google Colab T4 GPU, while keeping all development and scaffold verification local.
+This repository is initialized with a commit, but no remote is configured yet.
+
+To push to GitHub, add a remote and run:
+
+```bash
+git remote add origin <your-github-url>
+git push -u origin main
+```
+
+## Notes
+
+- Training scripts are implemented but should be executed on Colab for GPU efficiency.
+- The local setup is complete and verified with smoke tests.
