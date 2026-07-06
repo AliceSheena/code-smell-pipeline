@@ -13,14 +13,40 @@ except ImportError:
     GroupKFold = None
 
 
-def load_jsonl(path: Path) -> List[Dict[str, Any]]:
+def load_dataset_entries(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(f"Input dataset not found: {path}")
+
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if isinstance(parsed, list):
+        if all(isinstance(item, dict) for item in parsed):
+            return parsed
+        raise ValueError(f"Expected a JSON array of objects in {path}")
+
+    if isinstance(parsed, dict):
+        return [parsed]
+
     entries = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
+        for line_number, line in enumerate(f, 1):
             stripped = line.strip()
             if not stripped:
                 continue
-            entries.append(json.loads(stripped))
+            try:
+                entry = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid JSON on line {line_number} of {path}: {exc}") from exc
+            if not isinstance(entry, dict):
+                raise ValueError(f"Expected a JSON object on line {line_number} of {path}")
+            entries.append(entry)
     return entries
 
 
@@ -91,8 +117,30 @@ def split_dataset(entries: List[Dict[str, Any]], output_dir: Path, n_splits: int
     output_dir.mkdir(parents=True, exist_ok=True)
     groups = [get_group_key(e) for e in entries]
 
+    if not entries:
+        for name in ["train.jsonl", "val.jsonl", "test.jsonl"]:
+            (output_dir / name).write_text("", encoding="utf-8")
+        return
+
     if GroupKFold is None:
-        raise ImportError("scikit-learn is required for group-aware splitting. Install scikit-learn.")
+        print("Warning: scikit-learn not available; using a simple random 70/15/15 split.")
+        shuffled = entries.copy()
+        random.shuffle(shuffled)
+        train_end = int(0.7 * len(shuffled))
+        val_end = train_end + int(0.15 * len(shuffled))
+        train_entries = shuffled[:train_end]
+        val_entries = shuffled[train_end:val_end]
+        test_entries = shuffled[val_end:]
+        with (output_dir / "train.jsonl").open("w", encoding="utf-8") as out:
+            for entry in train_entries:
+                out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with (output_dir / "val.jsonl").open("w", encoding="utf-8") as out:
+            for entry in val_entries:
+                out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with (output_dir / "test.jsonl").open("w", encoding="utf-8") as out:
+            for entry in test_entries:
+                out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return
 
     unique_groups = set(groups)
     if len(unique_groups) < n_splits:
@@ -143,7 +191,9 @@ def split_dataset(entries: List[Dict[str, Any]], output_dir: Path, n_splits: int
 def prepare_dataset(input_path: str, output_dir: str, recover: bool = False) -> None:
     input_path = Path(input_path)
     output_dir = Path(output_dir)
-    entries = load_jsonl(input_path)
+    print(f"Loading dataset from {input_path}")
+    entries = load_dataset_entries(input_path)
+    print(f"Loaded {len(entries)} entries from {input_path}")
 
     clean_entries = []
     dirty_reports = []
@@ -168,11 +218,16 @@ def prepare_dataset(input_path: str, output_dir: str, recover: bool = False) -> 
     with report_path.open("w", encoding="utf-8") as report_file:
         json.dump({"clean_count": len(clean_entries), "dirty_count": len(dirty_reports), "dirty_reports": dirty_reports}, report_file, indent=2)
 
+    split_dir = output_dir / "splits"
+    split_dir.mkdir(parents=True, exist_ok=True)
     if not clean_entries:
-        raise RuntimeError("No valid dataset entries found after verification.")
+        print("No valid entries remained after verification; created empty split files.")
+        for name in ["train.jsonl", "val.jsonl", "test.jsonl"]:
+            (split_dir / name).write_text("", encoding="utf-8")
+        return
 
-    split_dataset(clean_entries, output_dir / "splits")
-    print(f"Prepared {len(clean_entries)} clean entries and wrote splits to {output_dir / 'splits'}")
+    split_dataset(clean_entries, split_dir)
+    print(f"Prepared {len(clean_entries)} clean entries and wrote splits to {split_dir}")
 
 
 def main() -> None:
