@@ -26,11 +26,14 @@ def smoke():
     run_cmd([sys.executable, "-m", "pytest", "-q", "tests/test_smoke.py"])
 
 
-def quick_infer(n_examples: int = 2):
-    # delegate to pipeline/end_to_end.py if available
+def quick_infer(input_file: str, use_ast: bool = False):
+    """Run end-to-end localisation and refactoring on an input file."""
     script = Path("pipeline/end_to_end.py")
     if script.exists():
-        run_cmd([sys.executable, str(script), "--localise-only", "--input-examples", str(n_examples)])
+        cmd = [sys.executable, str(script), "--input-file", input_file]
+        if use_ast:
+            cmd.append("--use-ast")
+        run_cmd(cmd)
     else:
         print("No pipeline/end_to_end.py found; skipping quick inference")
 
@@ -46,7 +49,8 @@ def main():
     sub.add_parser("smoke")
 
     p_inf = sub.add_parser("quick-infer")
-    p_inf.add_argument("--n", type=int, default=2)
+    p_inf.add_argument("--input-file", required=True, help="Path to the Python source file to infer on.")
+    p_inf.add_argument("--use-ast", action="store_true", help="Use the deterministic AST detector.")
 
     args = parser.parse_args()
     if args.cmd == "prepare":
@@ -54,7 +58,7 @@ def main():
     elif args.cmd == "smoke":
         smoke()
     elif args.cmd == "quick-infer":
-        quick_infer(args.n)
+        quick_infer(args.input_file, args.use_ast)
     else:
         parser.print_help()
 
