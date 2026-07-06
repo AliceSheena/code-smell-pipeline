@@ -1,0 +1,11 @@
+{
+  "localisation": {
+    "model": "unixcoder",
+    "max_length": 512,
+    "batch_size": 8
+  },
+  "refactoring": {
+    "model": "codet5-base",
+    "max_output_length": 256
+  }
+}
